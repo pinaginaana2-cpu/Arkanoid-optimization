@@ -463,8 +463,19 @@ void updateGame() {
        int startX = (WIDTH - COLS * BLOCK_WIDTH) / 2;
        int startY = HEIGHT - 100;
        
-       for (int i = 0; i < ROWS; i++) {
-           for (int j = 0; j < COLS; j++) {
+       float bLeft = ballX - ballSize/2, bRight = ballX + ballSize/2;
+       float bBottom = ballY - ballSize/2, bTop = ballY + ballSize/2;
+       int jMin = (int)floorf((bLeft - startX) / BLOCK_WIDTH) - 1;
+       int jMax = (int)floorf((bRight - startX) / BLOCK_WIDTH) + 1;
+       int iMin = (int)floorf((startY - bTop) / BLOCK_HEIGHT) - 1;
+       int iMax = (int)floorf((startY - bBottom) / BLOCK_HEIGHT) + 1;
+       if (jMin < 0) jMin = 0;
+       if (jMax > COLS - 1) jMax = COLS - 1;
+       if (iMin < 0) iMin = 0;
+       if (iMax > ROWS - 1) iMax = ROWS - 1;
+       
+       for (int i = iMin; i <= iMax; i++) {
+            for (int j = jMin; j <= jMax; j++) { {
                if (!blocks[i][j].active)
                    continue;
                
