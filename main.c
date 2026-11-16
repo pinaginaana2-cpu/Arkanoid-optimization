@@ -17,6 +17,13 @@
 #define COLS 14
 #define BLOCK_WIDTH 55
 #define BLOCK_HEIGHT 20
+
+#ifndef OPT_ALGO
+#define OPT_ALGO 1
+#endif
+#ifndef OPT_STAR_TABLE
+#define OPT_STAR_TABLE 1
+#endif
  
 typedef enum { BLOCK_NORMAL = 0, BLOCK_TOUGH, BLOCK_INDESTRUCTIBLE, BLOCK_EMPTY } BlockType;
 typedef enum { BONUS_NONE = 0, BONUS_EXTEND, BONUS_SLOW, BONUS_LIFE, BONUS_BIG_BALL } BonusType;
@@ -218,6 +225,23 @@ void drawGradientBackground() {
    //звезды
    glPointSize(1.5f);
    glBegin(GL_POINTS);
+   
+#if OPT_STAR_TABLE
+   static float starTabX[100], starTabY[100];
+   static int starsReady = 0;
+   if (!starsReady) {
+       for (int i = 0; i < 100; i++) {
+           starTabX[i] = (float)fmod(sin(i * 123.456f) * 1000, WIDTH);
+           starTabY[i] = (float)(fmod(cos(i * 78.901f) * 800, HEIGHT - 150) + 150);
+       }
+       starsReady = 1;
+   }
+   for (int i = 0; i < 100; i++) {
+       float brightness = 0.3f + sin(gameTime + i) * 0.2f;
+       glColor3f(brightness, brightness, brightness);
+       glVertex2f(starTabX[i], starTabY[i]);
+   }
+#else
    for (int i = 0; i < 100; i++) {
        float starX = fmod(sin(i * 123.456f) * 1000, WIDTH);
        float starY = fmod(cos(i * 78.901f) * 800, HEIGHT - 150) + 150;
@@ -225,6 +249,7 @@ void drawGradientBackground() {
        glColor3f(brightness, brightness, brightness);
        glVertex2f(starX, starY);
    }
+#endif
    glEnd();
 }
  
@@ -569,24 +594,27 @@ void updateGame() {
            return;
        }
        //столкновения с блоками
-       int startX = (WIDTH - COLS * BLOCK_WIDTH) / 2;
-       int startY = HEIGHT - 100;
+        int startX = (WIDTH - COLS * BLOCK_WIDTH) / 2;
+        int startY = HEIGHT - 100;
        
-       float bLeft = ballX - ballSize/2, bRight = ballX + ballSize/2;
-       float bBottom = ballY - ballSize/2, bTop = ballY + ballSize/2;
-       int jMin = (int)floorf((bLeft - startX) / BLOCK_WIDTH) - 1;
-       int jMax = (int)floorf((bRight - startX) / BLOCK_WIDTH) + 1;
-       int iMin = (int)floorf((startY - bTop) / BLOCK_HEIGHT) - 1;
-       int iMax = (int)floorf((startY - bBottom) / BLOCK_HEIGHT) + 1;
-       if (jMin < 0) jMin = 0;
-       if (jMax > COLS - 1) jMax = COLS - 1;
-       if (iMin < 0) iMin = 0;
-       if (iMax > ROWS - 1) iMax = ROWS - 1;
-       
-       for (int i = iMin; i <= iMax; i++) {
+#if OPT_ALGO
+        float bLeft = ballX - ballSize/2, bRight = ballX + ballSize/2;
+        float bBottom = ballY - ballSize/2, bTop = ballY + ballSize/2;
+        int jMin = (int)floorf((bLeft - startX) / BLOCK_WIDTH) - 1;
+        int jMax = (int)floorf((bRight - startX) / BLOCK_WIDTH) + 1;
+        int iMin = (int)floorf((startY - bTop) / BLOCK_HEIGHT) - 1;
+        int iMax = (int)floorf((startY - bBottom) / BLOCK_HEIGHT) + 1;
+        if (jMin < 0) jMin = 0;
+        if (jMax > COLS - 1) jMax = COLS - 1;
+        if (iMin < 0) iMin = 0;
+        if (iMax > ROWS - 1) iMax = ROWS - 1;
+#else
+        int iMin = 0, iMax = ROWS - 1, jMin = 0, jMax = COLS - 1;
+#endif      
+        for (int i = iMin; i <= iMax; i++) {
             for (int j = jMin; j <= jMax; j++) { {
-               if (!blocks[i][j].active)
-                   continue;
+                if (!blocks[i][j].active)
+                    continue;
                
                
                float bx = startX + j * BLOCK_WIDTH;
