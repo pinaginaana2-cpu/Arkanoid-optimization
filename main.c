@@ -82,6 +82,115 @@ void specialKeysUp(int key, int x, int y);
 void mouseClick(int button, int state, int x, int y);
 void timer(int value);
 void drawGradientBackground();
+#ifdef PROFILE
+// встроенный профилировщик
+#ifndef PROFILE_FRAMES
+#define PROFILE_FRAMES 3000
+#endif
+#ifndef PROFILE_WARMUP
+#define PROFILE_WARMUP 120
+#endif
+#ifndef PROFILE_LABEL
+#define PROFILE_LABEL "run"
+#endif
+
+static double profUpdateMs = 0;
+static double profTUpd[PROFILE_FRAMES], profTSub[PROFILE_FRAMES];
+static double profTGpu[PROFILE_FRAMES], profTInt[PROFILE_FRAMES];
+static int profTick = 0, profN = 0;
+static double profLastEnd = 0;
+static unsigned profRng = 12345u;
+static float profWobble = 0;
+
+static double profNow(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
+
+static int profCmp(const void* a, const void* b) {
+    double x = *(const double*)a, y = *(const double*)b;
+    return (x > y) - (x < y);
+}
+
+static void profStats(const char* name, const double* v, int n, double* meanOut, double* p95Out) {
+    double* t = (double*)malloc(n * sizeof(double));
+    double sum = 0;
+    for (int i = 0; i < n; i++) {
+        t[i] = v[i]; sum += v[i];
+    }
+    qsort(t, n, sizeof(double), profCmp);
+    double mean = sum / n, med = t[n / 2], p95 = t[(int)(n * 0.95)], mx = t[n - 1];
+    printf("%-26s среднее %9.2f | медиана %9.2f | p95 %9.2f | макс %9.2f\n",
+           name, mean * 1000, med * 1000, p95 * 1000, mx * 1000);
+    *meanOut = mean;
+    *p95Out = p95;
+    free(t);
+}
+
+static void profReport(void) {
+    double um, up, sm, sp, gm, gp, im, ip;
+    printf("\n=== PROFILE [%s]  кадров: %d ===\n", PROFILE_LABEL, profN);
+    printf("(время в микросекундах; интервал кадров - в мс)\n");
+    profStats("updateGame, мкс", profTUpd, profN, &um, &up);
+    profStats("display без glFinish, мкс", profTSub, profN, &sm, &sp);
+    profStats("display с glFinish, мкс", profTGpu, profN, &gm, &gp);
+    double sumI = 0;
+    for (int i = 0; i < profN; i++) sumI += profTInt[i];
+    im = sumI / profN; ip = 0;
+    printf("средний интервал кадров    %9.2f мс (%.1f кадров/с)\n", im, 1000.0 / im);
+
+    const char* path = "profile_results.csv";
+    FILE* chk = fopen(path, "r");
+    int exists = chk != NULL;
+    if (chk) fclose(chk);
+    FILE* f = fopen(path, "a");
+    if (f) {
+        if (!exists)
+            fprintf(f, "label,frames,upd_mean_us,upd_p95_us,sub_mean_us,sub_p95_us,gpu_mean_us,gpu_p95_us,interval_mean_ms\n");
+        fprintf(f, "%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", PROFILE_LABEL, profN,
+                um * 1000, up * 1000, sm * 1000, sp * 1000, gm * 1000, gp * 1000, im);
+        fclose(f);
+        printf("результат добавлен в %s\n", path);
+    }
+    (void)ip;
+}
+
+static void profAutoplay(void) {
+    if (!gameRunning) {
+        currentLevel = 1;
+        keyboard('r', 0, 0);
+    }
+    lives = 1000;
+    if (!gameStarted && gameRunning)
+        keyboard(' ', 0, 0);
+    if (profTick % 20 == 0) {
+        profRng = profRng * 1664525u + 1013904223u;
+        profWobble = (float)((int)((profRng >> 8) % 91) - 45);
+    }
+    float target = ballX + profWobble - paddleWidth / 2.0f;
+    if (target < 0) target = 0;
+    if (target + paddleWidth > WIDTH) target = (float)(WIDTH - paddleWidth);
+    paddleX = target;
+    profTick++;
+}
+
+static void profRecord(double submitMs, double gpuMs) {
+    double now = profNow();
+    if (profTick > PROFILE_WARMUP && profN < PROFILE_FRAMES) {
+        profTUpd[profN] = profUpdateMs;
+        profTSub[profN] = submitMs;
+        profTGpu[profN] = gpuMs;
+        profTInt[profN] = now - profLastEnd;
+        profN++;
+    }
+    profLastEnd = now;
+    if (profN >= PROFILE_FRAMES) {
+        profReport();
+        exit(0);
+    }
+}
+#endif
  
 //рисование текста
 void drawText(float x, float y, const char* text, float r, float g, float b) {
@@ -552,6 +661,9 @@ void updateGame() {
 }
 // отрисовка кадра
 void display() {
+#ifdef PROFILE
+   double profT0 = profNow();
+#endif
    drawGradientBackground();
    // отрисовка блоков
    int startX = (WIDTH - COLS * BLOCK_WIDTH) / 2;
@@ -636,7 +748,15 @@ void display() {
        }
    }
    
+#ifdef PROFILE
+   double profSub = profNow() - profT0;
+   glFinish();
+   double profGpu = profNow() - profT0;
+#endif
    glutSwapBuffers();
+#ifdef PROFILE
+   profRecord(profSub, profGpu);
+#endif
 }
 //обработчик клавиатуры
 void keyboard(unsigned char key, int x, int y) {
@@ -711,15 +831,28 @@ void mouseClick(int button, int state, int x, int y) {
 }
  
 void timer(int value) {
-   if (gameRunning && gameStarted) gameTime += 0.016f;
-   bgOffset += 0.01f;
-   updateGame();
-   glutPostRedisplay();
-   glutTimerFunc(16, timer, 0);
+    if (gameRunning && gameStarted) gameTime += 0.016f;
+    bgOffset += 0.01f;
+#ifdef PROFILE
+    profAutoplay();
+    double profT0 = profNow();
+    updateGame();
+    profUpdateMs = profNow() - profT0;
+    glutPostRedisplay();
+    glutTimerFunc(1, timer, 0);
+#else
+    updateGame();
+    glutPostRedisplay();
+    glutTimerFunc(16, timer, 0);
+#endif
 }
  
 int main(int argc, char** argv) {
+#ifdef PROFILE
+   srand(12345);
+#else
    srand((unsigned int)time(NULL));
+#endif
    glutInit(&argc, argv);
    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
    glutInitWindowSize(WIDTH, HEIGHT);
